@@ -2,13 +2,6 @@ MIT License
 
 Copyright (c) 2026 Soumyo Roy
 
-This license covers the documentation (README.md), the ACPI source files in
-ACPI-sources/, and the scripts in scripts/ written for this repository.
-
-It does NOT cover OpenCore, the kexts, drivers, tools or any other third-party
-files inside EFI/. Those belong to their respective authors and are distributed
-under their own licenses.
-
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
