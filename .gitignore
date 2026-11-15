@@ -1,0 +1,17 @@
+# macOS
+.DS_Store
+._*
+.fseventsd/
+.Spotlight-V100/
+.Trashes/
+
+# Apple recovery / installer images (Apple software, large)
+*.dmg
+*.chunklist
+com.apple.recovery.boot/
+
+# Config backups and logs
+*.bak
+EFI/OC/config-*.plist
+!EFI/OC/config-install.plist
+opencore-*.txt
