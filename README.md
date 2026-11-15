@@ -115,11 +115,12 @@ Kext versions were read from each kext's `Info.plist` (`CFBundleVersion`).
 20. [Daily use tips (for Windows users)](#20-daily-use-tips-for-windows-users)
 21. [macOS updates — the golden rule](#21-macos-updates--the-golden-rule)
 22. [Troubleshooting](#22-troubleshooting)
-23. [Appendix A — Final configuration summary](#appendix-a--final-configuration-summary)
-24. [Appendix B — Custom ACPI source files](#appendix-b--custom-acpi-source-files)
-25. [Appendix C — Lid-lock script](#appendix-c--lid-lock-script)
-26. [Appendix D — Useful commands](#appendix-d--useful-commands)
-27. [Credits](#credits)
+23. [Repairing macOS without losing data (reinstall over itself)](#repairing-macos-without-losing-data-reinstall-over-itself)
+24. [Appendix A — Final configuration summary](#appendix-a--final-configuration-summary)
+25. [Appendix B — Custom ACPI source files](#appendix-b--custom-acpi-source-files)
+26. [Appendix C — Lid-lock script](#appendix-c--lid-lock-script)
+27. [Appendix D — Useful commands](#appendix-d--useful-commands)
+28. [Credits](#credits)
 
 ---
 
@@ -756,6 +757,58 @@ cp /Volumes/EFI/EFI/OC/config-backup.plist /Volumes/EFI/EFI/OC/config.plist
 reboot
 ```
 💡 **Always make a backup before editing:** `cp config.plist config-before-<change>.plist`
+
+---
+
+## Repairing macOS without losing data (reinstall over itself)
+
+**When:** Apple apps crash right away (About This Mac, System Information, the photo picker), usually after a freeze or forced power-off.
+
+**1. Check for a damaged system file** (open the crashing app once first):
+```
+log show --last 1h --style compact --predicate 'sender == "apfs"' | grep -i "hash mismatch" | tail -3
+diskutil info disk0 | grep SMART; diskutil verifyVolume /
+```
+- Lines with **"hash mismatch"** → a sealed system file is damaged. Continue below.
+- **SMART: Failing** → back up immediately, the SSD is dying.
+
+**2. Show the OpenCore menu** (and back up the config):
+```
+P=$(diskutil info / | awk -F': *' '/APFS Physical Store/{print $2}'); E=${P%s2}s1
+sudo diskutil mount $E
+M=$(diskutil info $E | awk -F': *' '/Mount Point/{print $2}'); C="$M/EFI/OC/config.plist"
+sudo cp "$C" "$M/EFI/OC/config-before-reinstall.plist"
+sudo plutil -replace Misc.Boot.ShowPicker -bool YES "$C"
+sudo plutil -replace Misc.Boot.HideAuxiliary -bool NO "$C"
+plutil -lint "$C"
+```
+
+**3. Reinstall** (charger plugged in, lid open):
+- Restart → **Recovery 26.x (dmg)** (on Tahoe the SSD's own Recovery is also labelled "dmg") → **Reinstall macOS Tahoe** → **Macintosh HD** (not the HDD) → Install.
+- Each restart: choose **macOS Installer** while it is listed, then **Macintosh HD** ("Macintosh HD - Data" may appear mid-install — that's normal).
+- Takes about 1–1.5 hours. If the final boot freezes on the Apple logo for 20+ minutes, hold power and pick **Macintosh HD** again.
+
+**4. After logging in:**
+- About This Mac should open and show **Intel Iris Xe Graphics 1536 MB** (if not: `sudo installer -pkg ~/Downloads/WhateverXe-Graphics-0.4.4.pkg -target /` and restart).
+- ⚠️ The reinstall **resets display sleep to 30 minutes** — set it back:
+  ```
+  sudo pmset -a displaysleep 0 sleep 0
+  pmset -g custom | grep -E "Power|^ sleep|displaysleep"
+  ```
+  All values must be **0** (Battery and AC).
+- Apps, files, settings, Apple Account and the lid-lock script are kept.
+
+**5. Hide the OpenCore menu again:**
+```
+P=$(diskutil info / | awk -F': *' '/APFS Physical Store/{print $2}'); E=${P%s2}s1
+sudo diskutil mount $E
+M=$(diskutil info $E | awk -F': *' '/Mount Point/{print $2}'); C="$M/EFI/OC/config.plist"
+sudo plutil -replace Misc.Boot.ShowPicker -bool NO "$C"
+sudo plutil -replace Misc.Boot.HideAuxiliary -bool YES "$C"
+plutil -lint "$C"
+```
+
+**Prevention:** wait 2–3 minutes before forcing a power-off, never force off during updates, and back up regularly. If corruption keeps returning without forced shutdowns, test the RAM with MemTest86.
 
 ---
 
