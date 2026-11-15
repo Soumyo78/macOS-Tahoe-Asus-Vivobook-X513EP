@@ -658,6 +658,8 @@ Now it boots: **Apple logo → login**, like a real Mac. 🎉
 - macOS **detects the lid** fine (`AppleClamshellState` changes to Yes).
 - But it has **`AppleClamshellCausesSleep = No`**: macOS refuses to sleep on lid close. The BIOS is designed for Windows "Modern Standby", and the graphics driver doesn't give macOS the signal it normally uses. WhateverXe also lists sleep/wake as unverified.
 - Turning the **screen off** (`pmset displaysleepnow`) works, but the screen **never comes back on**.
+- Leaving the lid closed for a long time can **hang the graphics driver** when the lid is opened. The crash report showed **AppleIntelTGLGraphics** stuck (with IOAcceleratorFamily2 and IOSurface waiting), and macOS **killed WindowServer** after 80 seconds, which logs you out.
+- The **lock screen's own display-off** (after about 1 minute of idle) is fine. A key press wakes it.
 
 ### Safe setup we use
 1. **Disable sleep and display sleep** (otherwise the screen goes black after 10 idle minutes and doesn't wake):
@@ -665,7 +667,7 @@ Now it boots: **Apple logo → login**, like a real Mac. 🎉
    sudo pmset -a displaysleep 0 sleep 0
    ```
 2. **Lock immediately:** System Settings → Lock Screen → *"Require password after screen saver begins or display is turned off"* → **Immediately**.
-3. **Install the lid-lock script** ([Appendix C](#appendix-c--lid-lock-script)): when you close the lid, the Mac **locks** (the screen stays on behind the lid).
+3. **Install the lid-lock script** ([Appendix C](#appendix-c--lid-lock-script)): when you close the lid, the Mac **locks** and the display is **kept awake** behind the lid, so it never has to wake up. After you open the lid, the lock screen stays visible for 60 seconds, then the normal lock-screen timer applies (press a key to wake).
 4. Manual lock any time: **Win + Ctrl + Q**.
 
 > ⚠️ With the lid closed, the laptop **stays awake**. **Shut it down** before putting it in a bag.
@@ -735,8 +737,10 @@ Before any macOS update, check that **WhateverXe** (graphics) and **AirportItlwm
 |---|---|
 | Stuck at the Apple logo (progress ~⅓) | Hold power, start again (intermittent graphics hang) |
 | Won't boot at all after a config change | Hold **Alt/Esc** at power-on, or boot the USB (**F8**), then restore a backup config (below) |
-| Black screen after the screen turned off | Hold power to restart. Make sure `displaysleep 0` and `sleep 0` are set |
-| Bluetooth keeps turning off/on | Restart (or Shut Down → wait → power on) |
+| Black screen after the screen turned off | Hold power to restart. Make sure `displaysleep 0` and `sleep 0` are set, and use the lid-lock script from [Appendix C](#appendix-c--lid-lock-script) |
+| **Logged out after opening the lid** (WindowServer crash) | The graphics driver's display-wake bug. Install the [Appendix C](#appendix-c--lid-lock-script) script (it keeps the display awake while the lid is closed) |
+| **About This Mac / System Information crash**, and the log shows `apfs … Data hash mismatch` | A system file got damaged (usually by forced power-offs). Reinstall macOS over itself from Recovery; it keeps apps and files |
+| **Bluetooth turns off and on** when connecting | `sudo pkill bluetoothd`, or restart |
 | "Disk not readable" popup | It's an NTFS/BitLocker disk: **Ignore**, or erase it (section 16) |
 | Keyboard light fights you | Turn off "Adjust keyboard brightness in low light" |
 | Settings or apps lag | Graphics acceleration isn't active → section 12 |
@@ -964,17 +968,21 @@ DefinitionBlock ("", "SSDT", 2, "HACK", "TPDETPD", 0x00000001)
 
 ## Appendix C — Lid-lock script
 
-Locks the Mac when the lid is closed (without turning the screen off).
+What it does: lid closed → **lock + keep the display awake** (`caffeinate -d`). Lid opened → after **60 seconds**, the display may sleep again normally.
 
-**Easiest:** run `zsh scripts/install-lidlock.sh` from this repository (remove it with `zsh scripts/uninstall-lidlock.sh`). Or paste this into Terminal:
+**Easiest:** run `zsh scripts/install-lidlock.sh` from this repository (remove it with `zsh scripts/uninstall-lidlock.sh`). It also replaces an older version if one is running. Or paste this into Terminal:
 ```bash
+launchctl bootout gui/$(id -u)/com.user.lidlock 2>/dev/null
 cat > ~/.lidlock.sh <<'SH'
 #!/bin/zsh
-prev=No
+prev=No; cpid=""
 while true; do
   s=$(ioreg -r -n IOPMrootDomain -d 1 | awk -F'= ' '/"AppleClamshellState"/{print $2; exit}')
   if [[ $s == Yes && $prev != Yes ]]; then
+    /usr/bin/caffeinate -d & cpid=$!
     /usr/bin/osascript -l JavaScript -e 'ObjC.import("Foundation"); $.NSBundle.bundleWithPath("/System/Library/PrivateFrameworks/login.framework").load; ObjC.bindFunction("SACLockScreenImmediate", ["int", []]); $.SACLockScreenImmediate();' >/dev/null 2>&1
+  elif [[ $s != Yes && $prev == Yes ]]; then
+    [[ -n $cpid ]] && (sleep 60; kill $cpid 2>/dev/null) &!; cpid=""
   fi
   prev=$s
   sleep 2
@@ -996,7 +1004,7 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.user.lidlock.plist &
 ```
 launchctl bootout gui/$(id -u)/com.user.lidlock; rm ~/Library/LaunchAgents/com.user.lidlock.plist ~/.lidlock.sh
 ```
-⚠️ Do **not** use `pmset displaysleepnow` in this script — on this laptop the screen doesn't come back on.
+⚠️ Never use `pmset displaysleepnow` on this laptop, because the screen doesn't come back on.
 
 ---
 
