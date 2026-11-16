@@ -116,11 +116,12 @@ Kext versions were read from each kext's `Info.plist` (`CFBundleVersion`).
 21. [macOS updates — the golden rule](#21-macos-updates--the-golden-rule)
 22. [Troubleshooting](#22-troubleshooting)
 23. [Repairing macOS without losing data (reinstall over itself)](#repairing-macos-without-losing-data-reinstall-over-itself)
-24. [Appendix A — Final configuration summary](#appendix-a--final-configuration-summary)
-25. [Appendix B — Custom ACPI source files](#appendix-b--custom-acpi-source-files)
-26. [Appendix C — Lid-lock script](#appendix-c--lid-lock-script)
-27. [Appendix D — Useful commands](#appendix-d--useful-commands)
-28. [Credits](#credits)
+24. [Lessons from the first week (good to know)](#lessons-from-the-first-week-good-to-know)
+25. [Appendix A — Final configuration summary](#appendix-a--final-configuration-summary)
+26. [Appendix B — Custom ACPI source files](#appendix-b--custom-acpi-source-files)
+27. [Appendix C — Lid-lock script](#appendix-c--lid-lock-script)
+28. [Appendix D — Useful commands](#appendix-d--useful-commands)
+29. [Credits](#credits)
 
 ---
 
@@ -809,6 +810,38 @@ plutil -lint "$C"
 ```
 
 **Prevention:** wait 2–3 minutes before forcing a power-off, never force off during updates, and back up regularly. If corruption keeps returning without forced shutdowns, test the RAM with MemTest86.
+
+⚠️ **Lesson learned: a same-version reinstall may NOT repair the damage.** When you reinstall the *same* macOS version, the installer can **reuse (clone) the existing system data** instead of writing fresh copies. Check this after reinstalling — if the log shows the **same offset and the same "got" hash** as before, nothing was replaced:
+```
+log show --last 2d --style compact --predicate 'sender == "apfs"' | grep "hash mismatch" | awk '{d=$1" "substr($2,1,8); match($0,/hash_mismatch:[0-9]+: [^ ]+/); v=substr($0,RSTART,RLENGTH); sub(/.*: /,"",v); match($0,/offset [0-9]+/); o=substr($0,RSTART+7,RLENGTH-7); k=v" offset="o; if(!(k in f)) f[k]=d; l[k]=d; n[k]++} END{for(k in n) print n[k], k, "| first:", f[k], "| last:", l[k]}'
+```
+(`os.dmgs1` = the system-library cryptex on Preboot; `disk1s4` = the sealed Macintosh HD system volume.) If the damage survives a reinstall, the reliable fix is a **clean install**: Time Machine backup → erase only the "Macintosh HD" volume group (never the whole SSD — the EFI partition must stay) → install → restore with Migration Assistant.
+
+Symptoms of these damaged blocks can be **delayed**: right after a restart things work, then hours later About This Mac, System Information or **bluetoothd** crash when macOS re-reads the damaged block. Quick check since the last boot:
+```
+log show --last boot --style compact --predicate 'sender == "apfs"' | grep -c "hash mismatch"
+```
+
+---
+
+## Lessons from the first week (good to know)
+
+- **Do NOT enable `SSDT-Disable_GPU_RP05` (NVIDIA off).** It saves only ~2 W but caused **repeated Intel GPU resets** (laggy clicks, `gpuRestart` reports every few minutes, all GPU rings idle). Leave it disabled.
+- **Laggy clicks but smooth mouse pointer** = GPU resets. Check:
+  ```
+  ls -lT /Library/Logs/DiagnosticReports | grep -i gpuRestart | awk '{print $6, $7, substr($8,1,5)}' | tail -5
+  ```
+- **Bluetooth:** drivers, firmware, USB map (HS07 = internal 255) and the NVRAM entries `bluetoothExternalDongleFailed` / `bluetoothInternalControllerInfo` are already correct in this EFI. If it toggles off/on: `sudo pkill bluetoothd`. Keep **Sound → Input** on "Internal Microphone" and pick the headset mic only inside apps (Handsfree mode is less stable).
+- **Built-in microphone:** [TGLDmic](https://github.com/labrouss/TGLDmic) v0.5.0 loads and its firmware runs (`BootResult = "OK FW_READY"`), but on the X513EP it records **silence** (flat −76.9 dBFS on all channels) — the DMIC setup it replays doesn't match this laptop. Getting it to work needs a Linux capture (`capture-sof-dmic.sh` from an Ubuntu live USB) sent to the developer. Use a Bluetooth/USB/wired headset mic meanwhile.
+- **Battery:** check health with `ioreg -rn AppleSmartBattery | grep -E '"DesignCapacity"|"MaxCapacity"|"CycleCount"'`. Exact drain in watts (unplugged):
+  ```
+  A=$(ioreg -rn AppleSmartBattery | grep -oE '"Amperage"=[0-9]+' | head -1 | cut -d= -f2); V=$(ioreg -rn AppleSmartBattery | grep -oE '"Voltage"=[0-9]+' | head -1 | cut -d= -f2); D=$(echo "18446744073709551616 - $A" | bc); echo "Drain: $D mA at $V mV = $(echo "scale=1; $D*$V/1000000" | bc) W"
+  ```
+  Idle package power is ~7–8 W because the CPU package never reaches deep C-states (likely touchpad polling / ASPM / Wi-Fi driver).
+- **Lid closed = still fully running** (sleep is disabled). Fans may keep spinning. **Never put it in a bag while on — shut down.**
+- **After any macOS reinstall:** run `sudo pmset -a displaysleep 0 sleep 0` again (reinstall resets display sleep to 30 min).
+- **Cleaner apps** (PureMac etc.): never delete WhateverXe-Graphics files, `~/.lidlock.sh`, `~/Library/LaunchAgents/com.user.lidlock.plist`, `/Library/User Pictures/Custom/`, TGLDmic files, or anything EFI/OpenCore/kext related.
+- **Login-screen picture from Terminal** (when the picker doesn't work): convert with `sips`, then `sudo dscl . -delete /Users/$USER JPEGPhoto; sudo dscl . -create /Users/$USER Picture "<path>"; sudo diskutil apfs updatePreboot /`. Fix rotation with `sudo sips -r 90|180|270 "<path>"`.
 
 ---
 
